@@ -884,7 +884,7 @@ const Cpu = (function () {
            typeof HadoukenCpuAI !== "undefined";
   }
 
-  // (Re)create the AI for a fresh match. Clears the learned player history.
+  // (Re)create the AI for a fresh match.
   function reset() {
     if (!available()) { ai = null; return; }
     ai = HadoukenCpuAI.createCpuAI(HadoukenEngine, { cpuSlot: CPU_SLOT });
@@ -914,7 +914,9 @@ const Cpu = (function () {
     return ai.chooseAction(snapshot(), Math.random);
   }
 
-  // Record the human's action so the AI can model their tendencies (spec #4).
+  // Kept for interface compatibility. The CPU decides purely from the current
+  // HP / energy / characters / rules and does NOT use the player's history, so
+  // this is a no-op inside the AI; the call is retained to keep the seam.
   function recordPlayerAction(action) {
     if (ai) ai.recordPlayerAction(action);
   }
@@ -960,8 +962,8 @@ function playAgain() {
   initState();
   state.char = keepChar;
   state.cpu = wasCpu;
-  // Rematch keeps the same opponent: the CPU retains what it learned about the
-  // player's tendencies across the previous game.
+  // Rematch keeps the same opponent and characters; the CPU reuses its existing
+  // instance (it decides afresh from the board each turn — no state to carry).
   startTurn();
 }
 
@@ -981,8 +983,8 @@ function reselectChars() {
   initState();
   state.cpu = wasCpu;
   if (state.cpu) {
-    // Re-selecting characters starts a fresh CPU match: reset the AI so it
-    // re-learns the player's tendencies against the new characters.
+    // Re-selecting characters starts a fresh CPU match: recreate the AI for the
+    // new characters.
     Cpu.reset();
   }
   goToCharSelect(1);
