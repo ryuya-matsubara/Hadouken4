@@ -1,0 +1,24 @@
+# SAM CLI configuration for the Hadouken online backend.
+# Region is fixed to ap-northeast-1 per the project requirement.
+version = 0.1
+
+[default.global.parameters]
+stack_name = "hadouken-online"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+stack_name = "hadouken-online"
+region = "ap-northeast-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = false
+resolve_s3 = true
+disable_rollback = false
+
+[default.sync.parameters]
+watch = false
+
+[default.delete.parameters]
+region = "ap-northeast-1"

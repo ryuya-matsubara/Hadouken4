@@ -1,0 +1,1937 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Hadouken Battle</title>
+
+<!-- PWA / add-to-home-screen -->
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#0e1116" />
+<link rel="apple-touch-icon" href="1A2C9ACE-6740-4F72-B823-92B95960C81F.png" />
+<link rel="apple-touch-icon" sizes="1254x1254" href="1A2C9ACE-6740-4F72-B823-92B95960C81F.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Hadouken" />
+<link rel="icon" type="image/png" href="1A2C9ACE-6740-4F72-B823-92B95960C81F.png" />
+
+<!-- Online mode configuration (WebSocket URL). Safe to commit: contains no secrets. -->
+<script src="online-config.js"></script>
+
+<!-- Start image downloads as early as possible for near-instant display -->
+<link rel="preconnect" href="https://github.com" crossorigin />
+<link rel="preconnect" href="https://objects.githubusercontent.com" crossorigin />
+<link rel="preload" as="image" href="https://github.com/user-attachments/assets/90a270b7-5853-4499-85d5-35a64f5a276b" />
+
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #1a1f2b;
+    --panel2: #232a38;
+    --accent: #ff8a00;
+    --p1: #ff6b6b;
+    --p2: #4fc3f7;
+    --text: #e8edf4;
+    --muted: #8a94a6;
+    --win: #7CFC00;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+    background: radial-gradient(circle at 50% -10%, #1c2536, var(--bg));
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 6px 20px 20px;
+  }
+  #app { width: 100%; max-width: 560px; }
+  h1.title {
+    margin: 0 0 12px;
+    text-align: center;
+    line-height: 0;
+  }
+  .title-img {
+    display: block;
+    width: 100%;
+    max-width: 480px;
+    height: auto;
+    margin: 0 auto;
+  }
+  .topbar { display: flex; justify-content: flex-start; margin-bottom: 4px; min-height: 30px; }
+  .home-btn {
+    border: 1px solid #39424f;
+    background: var(--panel2);
+    color: var(--text);
+    font-size: 0.82rem;
+    padding: 6px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .home-btn:hover { background: #303a4d; }
+  .turn-banner {
+    text-align: center;
+    font-size: 1rem;
+    color: var(--accent);
+    font-weight: bold;
+    margin-top: 2px;
+    margin-bottom: 8px;
+    min-height: 1.4em;
+  }
+
+  .status-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+  .player-card {
+    flex: 1;
+    background: var(--panel);
+    border-radius: 12px;
+    padding: 12px;
+    border: 2px solid transparent;
+    text-align: center;
+  }
+  .player-card.p1 { border-color: rgba(255,107,107,0.4); }
+  .player-card.p2 { border-color: rgba(79,195,247,0.4); }
+  .player-card.active { box-shadow: 0 0 0 2px var(--accent), 0 0 18px rgba(255,138,0,0.4); }
+  /* In online mode, the player's OWN card is highlighted more strongly so it is
+     obvious at a glance which side is you. */
+  .player-card.self {
+    background: #202a3d;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent), 0 0 22px rgba(255,138,0,0.55);
+  }
+  .player-card.self.active {
+    box-shadow: 0 0 0 3px var(--accent), 0 0 30px rgba(255,138,0,0.85);
+  }
+  .player-name { font-weight: bold; font-size: 1rem; margin-bottom: 4px; }
+  .p1 .player-name { color: var(--p1); }
+  .p2 .player-name { color: var(--p2); }
+  .stat-label { font-size: 0.66rem; color: var(--muted); letter-spacing: 1px; }
+  .hp { font-size: 1.3rem; letter-spacing: 2px; min-height: 1.4em; margin-bottom: 2px; }
+  .hp .empty { opacity: 0.18; }
+  .energy { font-size: 1.3rem; letter-spacing: 2px; min-height: 1.4em; }
+  .energy .empty { opacity: 0.18; }
+
+
+  /* Screens */
+  .screen { display: none; }
+  .screen.show { display: block; }
+  .card { background: var(--panel); border-radius: 14px; padding: 20px; }
+  .prompt { text-align: center; font-size: 1.15rem; margin-bottom: 16px; font-weight: bold; }
+
+  /* 3 columns: row1 = チャージ/ガード/ブラスト, row2 = メガブラスト/必殺技.
+     All cells are the same size so every action button is an equal square. */
+  .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  button.action {
+    padding: 0;
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    background: var(--panel2);
+    overflow: hidden;
+    transition: transform 0.08s, box-shadow 0.15s;
+    display: block;
+    line-height: 0;
+  }
+  button.action .icon {
+    display: block;
+    width: 100%;
+    height: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+  }
+  button.action:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
+  button.action:active:not(:disabled) { transform: translateY(0); }
+  button.action:disabled { opacity: 0.35; cursor: not-allowed; }
+  /* Unaffordable actions are still clickable (to preview their description),
+     just dimmed to signal they can't be confirmed. */
+  button.action.unaffordable .icon { opacity: 0.35; }
+  button.action.selected { box-shadow: 0 0 0 3px var(--accent), 0 0 16px rgba(255,138,0,0.45); }
+  .action-desc {
+    text-align: center; color: var(--text); font-size: 0.88rem; line-height: 1.5;
+    background: var(--panel2); border: 1px solid #39424f; border-radius: 10px;
+    padding: 12px; margin: 16px 0 4px; min-height: 3em;
+  }
+
+  /* ---- Compact action-select screen (fit without vertical scroll) ---- */
+  #app.select-active #turnBanner { margin-bottom: 6px; }
+  #app.select-active #statusRow { margin-bottom: 10px; }
+  #app.select-active .player-card { padding: 8px; }
+  #app.select-active .player-name { margin-bottom: 2px; }
+  #app.select-active .hp,
+  #app.select-active .energy { font-size: 1.05rem; min-height: 1.2em; }
+  #selectScreen .card { padding: 14px; }
+  #selectScreen .prompt { margin-bottom: 10px; }
+  /* Keep the two icon rows from getting too tall so everything fits. */
+  #selectScreen .actions { gap: 10px; max-width: 340px; margin: 0 auto; }
+  #selectScreen .action-desc { margin: 10px 0 10px; padding: 10px; min-height: 3.6em; }
+
+  .big-btn {
+    display: block;
+    width: 100%;
+    padding: 16px;
+    font-size: 1.1rem;
+    font-weight: bold;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    background: linear-gradient(90deg, var(--accent), #ff5e00);
+    color: #1a1206;
+    margin-top: 8px;
+  }
+  .big-btn:hover { filter: brightness(1.08); }
+  .big-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
+  .big-btn.secondary {
+    background: var(--panel2); color: var(--text);
+    border: 1px solid #39424f; font-size: 0.95rem; padding: 12px;
+  }
+  .pass-note { text-align: center; color: var(--muted); font-size: 0.95rem; margin: 8px 0 16px; }
+  .ready-labels { display: flex; justify-content: center; gap: 30px; margin: 10px 0 8px; }
+  .ready-labels .ready-label { width: 110px; text-align: center; font-size: 0.85rem; font-weight: bold; }
+  .ready-label.p1 { color: var(--p1); }
+  .ready-label.p2 { color: var(--p2); }
+  .ready-icons { display: flex; justify-content: center; align-items: flex-end; gap: 30px; margin: 0 0 18px; }
+  .ready-icons .ready-fig { width: 110px; height: 150px; position: relative; }
+
+  /* ============ CHARACTER SELECT ============ */
+  #charScreen .card { padding: 14px; }
+  #charScreen .prompt { margin-bottom: 10px; }
+  .char-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; align-items: start; }
+  .char-opt {
+    background: var(--panel2);
+    border: 2px solid #39424f;
+    border-radius: 12px;
+    padding: 8px;
+    cursor: pointer;
+    text-align: center;
+    transition: transform 0.08s, border-color 0.15s, box-shadow 0.15s;
+    color: var(--text);
+    font: inherit;
+    /* Fixed box size so all four cards match regardless of text length. */
+    height: 232px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow: hidden;
+  }
+  .char-opt:hover { transform: translateY(-2px); }
+  .char-opt.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent), 0 0 16px rgba(255,138,0,0.35); }
+  .char-opt img { width: 92px; height: 92px; object-fit: contain; display: block; margin: 0 auto 4px; }
+  .char-opt .cname { font-weight: bold; font-size: 0.95rem; margin-bottom: 2px; }
+  .char-opt .cmove { font-size: 0.8rem; color: var(--accent); font-weight: bold; margin-bottom: 3px; }
+  .char-opt .ccost { font-size: 0.7rem; color: var(--text); margin-bottom: 3px; }
+  .char-opt .cdesc { font-size: 0.72rem; color: var(--muted); line-height: 1.35; }
+
+  /* ============ BATTLE STAGE ============ */
+  #battle .card { padding: 0; overflow: hidden; }
+  /* "次のターンへ" button under the stage; only shown when the match continues */
+  .battle-next-wrap { display: none; padding: 12px; }
+  .battle-next-wrap.show { display: block; }
+  .stage {
+    position: relative;
+    width: 100%;
+    height: 300px;
+    background:
+      linear-gradient(180deg, #10233b 0%, #0b1424 55%, #060b14 100%);
+    overflow: hidden;
+  }
+  .stage-ground {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 74px;
+    background: linear-gradient(180deg, #2a2036, #171019);
+    box-shadow: inset 0 4px 12px rgba(0,0,0,0.5);
+  }
+  .stage-ground::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, transparent, rgba(255,180,90,0.6), transparent);
+  }
+
+  .fighter-wrap {
+    position: absolute; bottom: 70px; width: 150px; height: auto;
+    transition: transform 0.18s;
+  }
+  .fighter-wrap.left { left: 0; }
+  .fighter-wrap.right { right: 0; }
+  /* Angel is drawn larger than the others; render it a bit smaller. */
+  .fighter-wrap.char-angel { width: 118px; }
+  .fighter-wrap.char-angel.left  { left: 12px; }
+  .fighter-wrap.char-angel.right { right: 12px; }
+  .fighter-wrap.right.knockback { transform: translateX(40px); }
+  .fighter-wrap.left.knockback  { transform: translateX(-40px); }
+
+  /* Name tags sit at a fixed height at the top of the stage so both players'
+     labels line up regardless of the sprite image heights. */
+  .name-tag {
+    position: absolute; top: 10px; z-index: 15;
+    width: 150px; text-align: center;
+    font-size: 0.72rem; font-weight: bold; white-space: nowrap;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  }
+  .name-tag.left  { left: 0; }
+  .name-tag.right { right: 0; }
+  .name-tag.p1c { color: var(--p1); }
+  .name-tag.p2c { color: var(--p2); }
+
+  .battle-log {
+    position: absolute; left: 0; right: 0; bottom: 8px; text-align: center;
+    font-size: 0.92rem; font-weight: bold; min-height: 1.3em;
+    line-height: 1.35; white-space: pre-line;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.9);
+    z-index: 30;
+  }
+  .countdown {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    font-size: 5rem; font-weight: 900; color: #fff;
+    text-shadow: 0 0 24px var(--accent); z-index: 40; pointer-events: none;
+  }
+  @keyframes cdPop { 0%{transform:translate(-50%,-50%) scale(0.3);opacity:0} 30%{transform:translate(-50%,-50%) scale(1.2);opacity:1} 100%{transform:translate(-50%,-50%) scale(1);opacity:0} }
+  .countdown.pop { animation: cdPop 0.6s ease-out forwards; }
+
+  /* screen flash + shake */
+  .flash {
+    position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 25; pointer-events: none;
+  }
+  .flash.go { animation: flashAnim 0.35s ease-out; }
+  @keyframes flashAnim { 0%{opacity:0.9} 100%{opacity:0} }
+  @keyframes stageShake { 0%,100%{transform:translate(0,0)} 20%{transform:translate(-6px,3px)} 40%{transform:translate(6px,-3px)} 60%{transform:translate(-4px,2px)} 80%{transform:translate(4px,-2px)} }
+  .stage.shake { animation: stageShake 0.45s; }
+
+  /* heal sparkle overlay */
+  .heal-glow {
+    position:absolute; z-index:26; width:120px; height:120px; border-radius:50%;
+    background: radial-gradient(circle, rgba(120,255,170,0.85) 0%, rgba(80,220,140,0.35) 40%, rgba(80,220,140,0) 70%);
+    transform: scale(0); pointer-events:none;
+  }
+  .heal-glow.go { animation: healAnim 0.9s ease-out forwards; }
+  @keyframes healAnim { 0%{transform:scale(0.3);opacity:1} 100%{transform:scale(1.6);opacity:0} }
+
+  /* ---- image-based fighter ---- */
+  .fighter-img {
+    display: block;
+    width: 100%; height: auto;   /* box hugs the image; no empty space above */
+    filter: drop-shadow(0 6px 8px rgba(0,0,0,0.55));
+  }
+  /* Player 2's artwork is authored facing right; flip it to face left. */
+  .p2c .fighter-img { transform: scaleX(-1); }
+  /* idle bob (keep the P2 horizontal flip while bobbing) */
+  @keyframes idleBob    { 0%,100%{transform:translateY(0)}                50%{transform:translateY(-3px)} }
+  @keyframes idleBobFlip{ 0%,100%{transform:scaleX(-1) translateY(0)}     50%{transform:scaleX(-1) translateY(-3px)} }
+  .p1c .fighter-img { animation: idleBob 1.7s ease-in-out infinite; }
+  .p2c .fighter-img { animation: idleBobFlip 1.7s ease-in-out infinite; }
+
+  /* projectiles are the provided effect images */
+  .projectile {
+    position:absolute; z-index:20; pointer-events:none;
+    object-fit: contain;
+  }
+  .proj-blast   { width:48px; height:48px; }
+  .proj-mega    { width:92px; height:92px; }
+  .proj-special { width:110px; height:110px; }
+  /* effects fired by player 2 face the other way */
+  .projectile.from-p2 { transform: scaleX(-1); }
+
+  @keyframes travelR { from{left:110px} to{left:calc(100% - 150px)} }
+  @keyframes travelL { from{right:110px} to{right:calc(100% - 150px)} }
+
+  .impact {
+    position:absolute; z-index:22; width:80px; height:80px; border-radius:50%;
+    background: radial-gradient(circle, #fff 0%, #ffd36b 30%, rgba(255,120,0,0) 70%);
+    transform: scale(0); pointer-events:none;
+  }
+  .impact.go { animation: impactAnim 0.5s ease-out forwards; }
+  @keyframes impactAnim { 0%{transform:scale(0);opacity:1} 100%{transform:scale(2.4);opacity:0} }
+  .clash {
+    position:absolute; top:44%; left:50%; transform:translate(-50%,-50%);
+    font-size:1.4rem; font-weight:900; color:#fff; z-index:23;
+    text-shadow:0 0 12px #ffd36b; opacity:0;
+  }
+  .clash.go { animation: clashAnim 0.7s ease-out; }
+  @keyframes clashAnim { 0%{opacity:0;transform:translate(-50%,-50%) scale(0.4)} 40%{opacity:1;transform:translate(-50%,-50%) scale(1.3)} 100%{opacity:0;transform:translate(-50%,-50%) scale(1)} }
+
+  @keyframes fallLeft      { 0%{transform:rotate(0) translateY(0);opacity:1}          100%{transform:rotate(-82deg) translateY(30px);opacity:0.75} }
+  @keyframes fallRight     { 0%{transform:rotate(0) translateY(0);opacity:1}          100%{transform:rotate(82deg) translateY(30px);opacity:0.75} }
+  /* KO variants that preserve player 2's horizontal flip */
+  @keyframes fallLeftFlip  { 0%{transform:scaleX(-1) rotate(0) translateY(0);opacity:1}  100%{transform:scaleX(-1) rotate(-82deg) translateY(30px);opacity:0.75} }
+  @keyframes fallRightFlip { 0%{transform:scaleX(-1) rotate(0) translateY(0);opacity:1}  100%{transform:scaleX(-1) rotate(82deg) translateY(30px);opacity:0.75} }
+  .fighter-wrap.ko .fighter-img { transform-origin: bottom center; }
+  .fighter-wrap.left.p1c.ko  .fighter-img { animation: fallLeft  0.7s ease-in forwards; }
+  .fighter-wrap.right.p1c.ko .fighter-img { animation: fallRight 0.7s ease-in forwards; }
+  .fighter-wrap.left.p2c.ko  .fighter-img { animation: fallLeftFlip  0.7s ease-in forwards; }
+  .fighter-wrap.right.p2c.ko .fighter-img { animation: fallRightFlip 0.7s ease-in forwards; }
+
+  /* Result */
+  #result .winner-text { text-align: center; font-size: 2rem; font-weight: bold; margin: 20px 0; }
+  #result .winner-sub { text-align: center; color: var(--muted); margin-bottom: 20px; }
+
+  /* Home / title screen */
+  .home-card { text-align: center; }
+  .home-lead { font-size: 1.05rem; line-height: 1.7; margin: 4px 0 18px; }
+  .home-rules {
+    text-align: left; margin: 20px auto 0; max-width: 440px;
+    font-size: 0.82rem; color: var(--muted); line-height: 1.9;
+    border-top: 1px solid #2a3140; padding-top: 14px;
+  }
+  .home-rules .hr-item b { color: var(--text); }
+  /* On the home screen, hide the in-game topbar and status row */
+  #app.home-active #topbar,
+  #app.home-active #statusRow,
+  #app.home-active #turnBanner { display: none; }
+  /* Hide the top status row & turn banner on the character-select screen. */
+  #app.char-active #statusRow,
+  #app.char-active #turnBanner { display: none; }
+  /* The big title image only appears on the home screen. */
+  h1.title { display: none; }
+  #app.home-active h1.title { display: block; }
+
+  /* ============ ONLINE MODE ============ */
+  /* Hide in-game chrome on the mode-select and lobby screens too. */
+  #app.home-active #topbar,
+  #app.lobby-active #statusRow,
+  #app.lobby-active #turnBanner { display: none; }
+  #app.lobby-active #topbar { display: flex; }
+
+  .mode-btns { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+  .lobby-card .prompt { margin-bottom: 6px; }
+  .lobby-sub { text-align: center; color: var(--muted); font-size: 0.9rem; margin: 0 0 16px; }
+  .code-input {
+    display: block; width: 100%; text-align: center; letter-spacing: 10px;
+    font-size: 2rem; font-weight: bold; padding: 14px 10px; margin: 6px 0 4px;
+    border-radius: 10px; border: 1px solid #39424f; background: var(--panel2);
+    color: var(--text); font-family: inherit;
+  }
+  .code-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(255,138,0,0.4); }
+  .code-display {
+    text-align: center; font-size: 2.4rem; font-weight: 900; letter-spacing: 12px;
+    color: var(--accent); margin: 10px 0; text-shadow: 0 0 14px rgba(255,138,0,0.4);
+  }
+
+  /* Connection status pill (top-right of the topbar) */
+  #topbar { justify-content: space-between; align-items: center; }
+  .conn-pill {
+    display: none; align-items: center; gap: 6px;
+    font-size: 0.72rem; font-weight: bold; padding: 5px 10px; border-radius: 999px;
+    border: 1px solid #39424f; background: var(--panel2); color: var(--muted);
+  }
+  #app.online .conn-pill { display: inline-flex; }
+  .conn-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .conn-pill.connected .dot { background: var(--win); box-shadow: 0 0 6px var(--win); }
+  .conn-pill.connected { color: var(--text); }
+  .conn-pill.connecting .dot { background: var(--accent); }
+  .conn-pill.disconnected .dot { background: var(--p1); }
+  .conn-pill.disconnected { color: var(--p1); }
+
+  /* Online status line under the turn banner (waiting / opponent-ready) */
+  .online-status {
+    text-align: center; font-size: 0.9rem; color: var(--accent);
+    min-height: 1.3em; margin: 2px 0 8px; font-weight: bold;
+  }
+  .online-status.waiting { color: var(--muted); }
+
+  /* Opponent-ready badges on the player cards during online play */
+  .ready-badge {
+    display: none; font-size: 0.66rem; font-weight: bold; color: var(--win);
+    margin-top: 4px;
+  }
+  .ready-badge.show { display: block; }
+
+  /* Toast / error banner */
+  .toast {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+    max-width: 90%; background: #2a1414; color: #ffd7d7; border: 1px solid #7a2b2b;
+    padding: 12px 16px; border-radius: 10px; font-size: 0.9rem; z-index: 200;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.5); opacity: 0; pointer-events: none;
+    transition: opacity 0.25s; text-align: center;
+  }
+  .toast.show { opacity: 1; }
+  .toast.info { background: #14202a; color: #cdeaff; border-color: #2b5a7a; }
+
+  /* Overlay shown while waiting for the opponent (blocks re-selection) */
+  .wait-overlay {
+    position: fixed; inset: 0; background: rgba(6,10,18,0.82);
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 150; text-align: center; padding: 20px;
+  }
+  .wait-overlay.show { display: flex; }
+  .wait-overlay .spinner {
+    width: 46px; height: 46px; border-radius: 50%;
+    border: 4px solid rgba(255,255,255,0.15); border-top-color: var(--accent);
+    animation: spin 0.9s linear infinite; margin-bottom: 16px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .wait-overlay .wait-text { font-size: 1.05rem; font-weight: bold; color: var(--text); }
+  .wait-overlay .wait-sub { font-size: 0.85rem; color: var(--muted); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="topbar" id="topbar">
+    <button class="home-btn" id="homeBtn">ホーム</button>
+    <span class="conn-pill" id="connPill"><span class="dot"></span><span id="connText">接続中…</span></span>
+  </div>
+  <h1 class="title">
+    <img class="title-img"
+         src="https://github.com/user-attachments/assets/90a270b7-5853-4499-85d5-35a64f5a276b"
+         alt="HADOUKEN BATTLE" fetchpriority="high" decoding="async" />
+  </h1>
+
+  <div class="turn-banner" id="turnBanner"></div>
+  <div class="online-status" id="onlineStatus"></div>
+
+  <div class="status-row" id="statusRow">
+    <div class="player-card p1" id="card1">
+      <div class="player-name" id="name1">プレイヤー1</div>
+      <div class="stat-label">HP</div>
+      <div class="hp" id="hp1"></div>
+      <div class="stat-label">エネルギー</div>
+      <div class="energy" id="energy1"></div>
+      <div class="ready-badge" id="ready1">✔ 選択済み</div>
+    </div>
+    <div class="player-card p2" id="card2">
+      <div class="player-name" id="name2">プレイヤー2</div>
+      <div class="stat-label">HP</div>
+      <div class="hp" id="hp2"></div>
+      <div class="stat-label">エネルギー</div>
+      <div class="energy" id="energy2"></div>
+      <div class="ready-badge" id="ready2">✔ 選択済み</div>
+    </div>
+  </div>
+
+  <!-- Home / title screen -->
+  <div class="screen" id="home">
+    <div class="card home-card">
+      <p class="home-lead">プレイヤー同士の読み合い対戦<br>相手のHPを0にした方が勝ち！</p>
+      <div class="mode-btns">
+        <button class="big-btn" id="startBtn">🎮 ローカル対戦</button>
+        <button class="big-btn secondary" id="onlineBtn">🌐 オンライン対戦</button>
+      </div>
+
+      <div class="home-rules">
+        <div class="hr-item"><b>🟢 HP</b>／3つからスタート。0になったら負け</div>
+        <div class="hr-item"><b>🟠 エネルギー</b>／最大3つ。ブラストや必殺技で消費</div>
+        <div class="hr-item"><b>【アクション】</b></div>
+        <div class="hr-item">・<b>チャージ</b>／エネルギーを1溜める</div>
+        <div class="hr-item">・<b>ブラスト</b>／エネルギー1消費。相手に1ダメージ</div>
+        <div class="hr-item">・<b>ガード</b>／ブラストを防ぐ</div>
+        <div class="hr-item">・<b>メガブラスト</b>／エネルギー2消費。相手に1ダメージ・ガード不能（ブラストと相殺）</div>
+        <div class="hr-item">・<b>必殺技</b>／キャラクター固有</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Online lobby: choose create / join room -->
+  <div class="screen" id="lobby">
+    <div class="card lobby-card">
+      <!-- Step 1: choose create or join -->
+      <div id="lobbyChoose">
+        <div class="prompt">オンライン対戦</div>
+        <p class="lobby-sub">友だちと同じルームコードで対戦しよう</p>
+        <div class="mode-btns">
+          <button class="big-btn" id="createRoomBtn">ルームを作成（CREATE ROOM）</button>
+          <button class="big-btn secondary" id="joinRoomBtn">ルームに参加（JOIN ROOM）</button>
+        </div>
+      </div>
+
+      <!-- Step 2a: create room - enter a 4-digit code to publish -->
+      <div id="lobbyCreate" style="display:none;">
+        <div class="prompt">ルームコードを決める</div>
+        <p class="lobby-sub">4桁の数字を入力して「発行」を押してください</p>
+        <input class="code-input" id="createCodeInput" inputmode="numeric" pattern="[0-9]*"
+               maxlength="4" placeholder="0000" autocomplete="off" />
+        <button class="big-btn" id="createConfirmBtn">このコードで発行</button>
+        <button class="big-btn secondary" id="createBackBtn">戻る</button>
+      </div>
+
+      <!-- Step 2b: join room - enter the code -->
+      <div id="lobbyJoin" style="display:none;">
+        <div class="prompt">ルームコードを入力</div>
+        <p class="lobby-sub">相手が発行した4桁のコードを入力してください</p>
+        <input class="code-input" id="joinCodeInput" inputmode="numeric" pattern="[0-9]*"
+               maxlength="4" placeholder="0000" autocomplete="off" />
+        <button class="big-btn" id="joinConfirmBtn">参加する</button>
+        <button class="big-btn secondary" id="joinBackBtn">戻る</button>
+      </div>
+
+      <!-- Step 3: waiting for the second player to join -->
+      <div id="lobbyWaiting" style="display:none;">
+        <div class="prompt">ルームコード</div>
+        <div class="code-display" id="roomCodeDisplay">----</div>
+        <p class="lobby-sub" id="lobbyWaitingSub">対戦相手の参加を待っています…</p>
+        <button class="big-btn secondary" id="lobbyCancelBtn">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Character select screen -->
+  <div class="screen" id="charScreen">
+    <div class="card">
+      <div class="prompt" id="charPrompt"></div>
+      <div class="char-grid" id="charGrid"></div>
+      <button class="big-btn" id="charConfirmBtn" disabled>キャラクターを決定</button>
+    </div>
+  </div>
+
+  <!-- Pass device screen -->
+  <div class="screen" id="passScreen">
+    <div class="card">
+      <div class="prompt" id="passPrompt"></div>
+      <button class="big-btn" id="passBtn">アクションを選ぶ</button>
+    </div>
+  </div>
+
+  <!-- Action selection screen -->
+  <div class="screen" id="selectScreen">
+    <div class="card">
+      <div class="prompt" id="selectPrompt"></div>
+      <div class="actions" id="actionButtons"></div>
+      <div class="action-desc" id="actionDesc">アクションを選んでください</div>
+      <button class="big-btn" id="selectConfirmBtn" disabled>決定</button>
+    </div>
+  </div>
+
+  <!-- Ready / execute screen -->
+  <div class="screen" id="readyScreen">
+    <div class="card">
+      <div class="prompt">両者のアクションが決定！</div>
+      <div class="ready-labels">
+        <div class="ready-label p1">プレイヤー1</div>
+        <div class="ready-label p2">プレイヤー2</div>
+      </div>
+      <div class="ready-icons">
+        <div class="ready-fig" id="readyFig1"></div>
+        <div class="ready-fig" id="readyFig2"></div>
+      </div>
+      <button class="big-btn" id="fightBtn">⚔️Battle⚔️</button>
+    </div>
+  </div>
+
+  <!-- Battle scene -->
+  <div class="screen" id="battle">
+    <div class="card">
+      <div class="stage" id="stage">
+        <div class="stage-ground"></div>
+
+        <!-- Name tags are anchored to the stage (not the fighters) so they
+             stay at the same height regardless of each sprite's image size. -->
+        <div class="name-tag p1c left">プレイヤー1</div>
+        <div class="name-tag p2c right">プレイヤー2</div>
+
+        <div class="fighter-wrap left p1c" id="fw1">
+          <img class="fighter-img" id="fig1" alt="" decoding="async" />
+        </div>
+
+        <div class="fighter-wrap right p2c" id="fw2">
+          <img class="fighter-img" id="fig2" alt="" decoding="async" />
+        </div>
+
+        <div class="flash" id="flash"></div>
+        <div class="countdown" id="countdown"></div>
+        <div class="battle-log" id="battleLog"></div>
+      </div>
+      <div class="battle-next-wrap" id="battleNextWrap">
+        <button class="big-btn" id="nextTurnBtn">次のターンへ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Result screen -->
+  <div class="screen" id="result">
+    <div class="card">
+      <div class="winner-text" id="winnerText"></div>
+      <div class="winner-sub" id="winnerSub"></div>
+      <button class="big-btn" id="restartBtn">もう一度あそぶ</button>
+      <button class="big-btn secondary" id="reselectBtn">キャラを選び直す</button>
+      <button class="big-btn secondary" id="resultHomeBtn">ホームに戻る</button>
+    </div>
+  </div>
+</div>
+
+<!-- Waiting overlay (online: after you submit, before the opponent does) -->
+<div class="wait-overlay" id="waitOverlay">
+  <div class="spinner"></div>
+  <div class="wait-text" id="waitText">対戦相手を待っています…</div>
+  <div class="wait-sub" id="waitSub">相手がアクションを選ぶまでお待ちください</div>
+</div>
+
+<!-- Toast for errors / info -->
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+const MAX_ENERGY = 3;
+const MAX_HP = 3;
+
+const TITLE_SRC = "https://github.com/user-attachments/assets/90a270b7-5853-4499-85d5-35a64f5a276b";
+
+// Shared action-select icons (charge / guard / blast / megablast are common to
+// all characters).
+const ICON_SRC = {
+  charge:    "https://github.com/user-attachments/assets/234b1b35-454c-4385-b13f-91630002fd77",
+  guard:     "https://github.com/user-attachments/assets/726c330a-e112-42b2-bab7-5fa8acde8760",
+  blast:     "https://github.com/user-attachments/assets/c7d20a1f-13c8-456f-a4fb-1f94ba8537b8",
+  megablast: "https://github.com/user-attachments/assets/c0af6115-e883-4f3b-998d-0a79e2168ab0",
+  // Info-only "check the opponent's special" button (not a real action).
+  oppSpecial: "https://github.com/user-attachments/assets/1397fd96-030d-49d8-8417-bf43f7b234ce",
+};
+
+// ---- Character roster --------------------------------------------------
+// Each character has:
+//   icon        select-screen portrait
+//   poses       stance/charge/guard/body (action-scene sprites)
+//   specialFx   effect image used during the special move
+//   specialIcon action-select icon for the special (bottom-right button)
+//   special     {name, cost, desc, effect}
+// Player 2 art is NOT pre-flipped: it is flipped in CSS (transform: scaleX(-1)).
+const CHARACTERS = {
+  hadou: {
+    id: "hadou",
+    name: "Hadou",
+    icon: "https://github.com/user-attachments/assets/f82a6155-09e9-482b-a41e-3cc679c99cb4",
+    poses: {
+      stance: "https://github.com/user-attachments/assets/1e4f98b5-2249-45c3-a940-e0adcdc2515b",
+      charge: "https://github.com/user-attachments/assets/81c30b1d-9647-4391-bf44-416c0f6c5e3d",
+      guard:  "https://github.com/user-attachments/assets/fa000c14-9319-4773-9b94-8c5f8f9749da",
+      body:   "https://github.com/user-attachments/assets/149b3aa6-1641-41d4-8742-7599de51c6ce",
+    },
+    specialFx:   "https://github.com/user-attachments/assets/a1eec8fc-fb2e-45fa-b6d0-f1de471847ce",
+    specialIcon: "https://github.com/user-attachments/assets/f96de252-6c23-411b-aebb-34f34f9d8a82",
+    special: { name: "波動拳", cost: 3, dmg: 1, guardable: false, kind: "attack", attackClass: "pierce",
+               desc: "必ず1ダメージ。ガード・ブラスト・メガブラスト・ギガブラストを無効化" },
+  },
+  blaze: {
+    id: "blaze",
+    name: "Blaze",
+    icon: "https://github.com/user-attachments/assets/bf25d5c0-672f-45bc-8228-e38a08dc49ff",
+    poses: {
+      stance: "https://github.com/user-attachments/assets/8f970804-88f3-480d-a055-88748f9d2f26",
+      charge: "https://github.com/user-attachments/assets/4efe2895-d055-4e16-a342-024fc3c7cf87",
+      guard:  "https://github.com/user-attachments/assets/ef2e645b-3257-4c3b-8fe2-0fb66065b7d9",
+      body:   "https://github.com/user-attachments/assets/77d615e4-f3b0-47b8-bb4a-4e9486223430",
+    },
+    specialFx:   "https://github.com/user-attachments/assets/ece64b81-6382-41fb-a914-8a5ac569b9ef",
+    specialIcon: "https://github.com/user-attachments/assets/dd12d15e-b5db-432e-87f6-49accbe398a4",
+    special: { name: "ギガブラスト", cost: 3, dmg: 2, guardable: false, kind: "attack", attackClass: "giga",
+               desc: "ガード不能。相手に2ダメージ（ブラスト・メガブラストと相殺）" },
+  },
+  phantom: {
+    id: "phantom",
+    name: "Phantom",
+    icon: "https://github.com/user-attachments/assets/2f6d7aad-5b9f-408d-be74-449495e902ce",
+    poses: {
+      stance: "https://github.com/user-attachments/assets/b02941b1-6ab1-45e1-9827-13560080e17d",
+      charge: "https://github.com/user-attachments/assets/9e76b42e-8bfb-42ee-a1eb-fd4055ddd591",
+      guard:  "https://github.com/user-attachments/assets/ec0d3160-094c-4a25-8c7f-cf4fac72f940",
+      body:   "https://github.com/user-attachments/assets/b90bcb86-65fe-44ff-8c0d-b6eb7f7d33fb",
+    },
+    specialFx:   "https://github.com/user-attachments/assets/2f0e8373-6cdd-4166-a7e3-a01abbbd2364",
+    specialIcon: "https://github.com/user-attachments/assets/315f854e-97d1-4af4-a0f3-bd12205999da",
+    special: { name: "VOID", cost: 0, dmg: 0, guardable: false, kind: "drain",
+               desc: "相手のエネルギーを1減らす" },
+  },
+  angel: {
+    id: "angel",
+    name: "Angel",
+    icon: "https://github.com/user-attachments/assets/7dcf6ead-1a63-437b-8ea7-17718bcc5da2",
+    poses: {
+      stance: "https://github.com/user-attachments/assets/41288365-cbf8-4d49-8aca-1419b8ff0ba4",
+      charge: "https://github.com/user-attachments/assets/28e5537e-2e32-4071-b2fe-4fd5fa52ac09",
+      guard:  "https://github.com/user-attachments/assets/9aaa07b4-2d0b-4607-9b0d-c7af29b5a680",
+      body:   "https://github.com/user-attachments/assets/0c489515-670b-46f8-8cf8-f049e19506d9",
+    },
+    specialFx:   "https://github.com/user-attachments/assets/42808580-9269-41b6-9682-9bef5bc95e47",
+    specialIcon: "https://github.com/user-attachments/assets/3478bdbc-bab9-4794-aa38-63c2e4aac716",
+    special: { name: "ヒール", cost: 2, dmg: 0, guardable: false, kind: "heal",
+               desc: "自分のHPを1回復する" },
+  },
+};
+
+// Shared blast (ブラスト) effect image used by every character.
+const BLAST_FX = "https://github.com/user-attachments/assets/64d32ccf-51e6-4207-9147-9ccdeea73e85";
+// Megablast uses its own effect image (distinct from the plain blast effect).
+const MEGA_FX = "https://github.com/user-attachments/assets/1b9a0874-895e-4761-b925-87125784333e";
+
+const CHAR_ORDER = ["hadou", "blaze", "phantom", "angel"];
+
+// ---- image resolution helpers -----------------------------------------
+function charOf(player) { return CHARACTERS[state.char[player]]; }
+
+// pose image shown for each action (idle/countdown uses "stance")
+function poseSrc(player, key) {
+  const c = charOf(player);
+  const p = c.poses;
+  if (key === "charge") return p.charge;
+  if (key === "guard")  return p.guard;
+  if (key === "special") {
+    // A heal special (Angel) swaps to its dedicated heal artwork instead of
+    // the generic attack body pose.
+    if (c.special.kind === "heal") return c.specialFx;
+    return p.body;
+  }
+  if (key === "blast" || key === "megablast") return p.body;
+  return p.stance;
+}
+function specialFxSrc(player)   { return charOf(player).specialFx; }
+function blastFxSrc()           { return BLAST_FX; }
+function megaFxSrc()            { return MEGA_FX; }
+
+// Preload every image up-front and KEEP the Image objects alive in a cache.
+const IMG_CACHE = {};
+(function preloadImages() {
+  const urls = [TITLE_SRC, BLAST_FX, MEGA_FX, ...Object.values(ICON_SRC)];
+  for (const id of CHAR_ORDER) {
+    const c = CHARACTERS[id];
+    urls.push(c.icon, c.specialFx, c.specialIcon, ...Object.values(c.poses));
+  }
+  urls.forEach((src) => {
+    const im = new Image();
+    im.decoding = "async";
+    im.src = src;
+    IMG_CACHE[src] = im;
+  });
+})();
+
+// ---- Action definitions (special is resolved per character) ------------
+function actionMeta(player, key) {
+  if (key === "charge")    return { label: "チャージ", cost: 0, icon: ICON_SRC.charge, energy: "+1", desc: "エネルギーを1溜める" };
+  if (key === "blast")     return { label: "ブラスト", cost: 1, icon: ICON_SRC.blast, energy: "-1", desc: "相手に1ダメージ。ガードで防がれる" };
+  if (key === "guard")     return { label: "ガード",   cost: 0, icon: ICON_SRC.guard, energy: "0",  desc: "ブラストを防ぐ" };
+  if (key === "megablast") return { label: "メガブラスト", cost: 2, icon: ICON_SRC.megablast, energy: "-2", desc: "相手に1ダメージ。ガード不能（ブラストと相殺）" };
+  if (key === "oppSpecial") {
+    // Info-only entry: describe the OPPONENT's special so the player can check
+    // it. It is never a selectable action (info: true).
+    const opp = player === 1 ? 2 : 1;
+    const osp = charOf(opp).special;
+    return { label: "相手の必殺技", info: true, icon: ICON_SRC.oppSpecial,
+             desc: `${osp.name}／${osp.desc}` };
+  }
+  // special
+  const sp = charOf(player).special;
+  return { label: sp.name, cost: sp.cost, icon: charOf(player).specialIcon,
+           energy: sp.cost === 0 ? "0" : `-${sp.cost}`, desc: sp.desc };
+}
+
+let state;
+let battleToken = 0; // incremented whenever a battle should be cancelled (e.g. Home)
+
+function initState() {
+  state = {
+    energy: { 1: 0, 2: 0 },
+    hp: { 1: MAX_HP, 2: MAX_HP },
+    char: { 1: null, 2: null },
+    turn: 1,
+    currentPlayer: 1,
+    choice: { 1: null, 2: null },
+    // "offline" = original hot-seat game; "online" = WebSocket match.
+    mode: "offline",
+  };
+}
+
+// Show the home / title screen, cancelling any running battle.
+function goHome() {
+  battleToken++;          // invalidates any in-flight runBattle()
+  // Leaving to home tears down any online session.
+  if (typeof Online !== "undefined") Online.leaveAndClose();
+  initState();
+  setActiveCard(0);
+  $("turnBanner").textContent = "";
+  $("onlineStatus").textContent = "";
+  $("app").classList.remove("online");
+  // Reset player-card labels/highlight back to the local-mode defaults.
+  $("name1").textContent = "プレイヤー1";
+  $("name2").textContent = "プレイヤー2";
+  $("card1").classList.remove("self");
+  $("card2").classList.remove("self");
+  hideWaitOverlay();
+  setReadyBadge(1, false); setReadyBadge(2, false);
+  showScreen("home");
+}
+
+// Begin a fresh game from the home screen -> character selection.
+function startGame() {
+  battleToken++;
+  initState();
+  goToCharSelect(1);
+}
+
+// Play again after a result, keeping the chosen characters.
+function playAgain() {
+  if (state.mode === "online") {
+    // Online rematch is coordinated by the server (resets HP/energy/turn).
+    Online.rematch();
+    $("restartBtn").disabled = true;
+    $("winnerSub").textContent = "再戦の準備中…";
+    return;
+  }
+  battleToken++;
+  const keepChar = { 1: state.char[1], 2: state.char[2] };
+  initState();
+  state.char = keepChar;
+  startTurn();
+}
+
+// Re-select characters after a result (both players pick again).
+function reselectChars() {
+  if (state.mode === "online") {
+    // Ask the server to reset the room back to character select. Both clients
+    // will receive "charSelectReset" and re-enter the selection screen.
+    Online.changeCharacters();
+    $("reselectBtn").disabled = true;
+    $("restartBtn").disabled = true;
+    $("winnerSub").textContent = "キャラ選択に戻っています…";
+    return;
+  }
+  battleToken++;
+  initState();
+  goToCharSelect(1);
+}
+
+const $ = (id) => document.getElementById(id);
+const screens = ["home", "lobby", "charScreen", "passScreen", "selectScreen", "readyScreen", "battle", "result"];
+function showScreen(id) {
+  screens.forEach((s) => $(s).classList.toggle("show", s === id));
+  // toggle home layout (hide in-game chrome on the title screen)
+  $("app").classList.toggle("home-active", id === "home");
+  // lobby layout (hide status row / turn banner, keep the topbar for the pill)
+  $("app").classList.toggle("lobby-active", id === "lobby");
+  // hide the top status row (wins / HP / energy) on the character-select screen
+  $("app").classList.toggle("char-active", id === "charScreen");
+  // compact layout on the action-select screen so it fits without scrolling
+  $("app").classList.toggle("select-active", id === "selectScreen");
+}
+
+function renderEnergy() {
+  for (const p of [1, 2]) {
+    const n = state.energy[p];
+    let html = "";
+    for (let i = 0; i < MAX_ENERGY; i++) html += `<span class="${i < n ? "" : "empty"}">🟠</span>`;
+    $("energy" + p).innerHTML = html;
+  }
+}
+
+function renderHP() {
+  for (const p of [1, 2]) {
+    const n = state.hp[p];
+    let html = "";
+    for (let i = 0; i < MAX_HP; i++) html += `<span class="${i < n ? "" : "empty"}">🟢</span>`;
+    $("hp" + p).innerHTML = html;
+  }
+}
+
+function setActiveCard(player) {
+  $("card1").classList.toggle("active", player === 1);
+  $("card2").classList.toggle("active", player === 2);
+}
+
+// ---- Character selection ----
+let pendingChar = null;
+let pendingAction = null;
+function goToCharSelect(player) {
+  state.currentPlayer = player;
+  setActiveCard(player);
+  pendingChar = null;
+  $("charPrompt").textContent = `プレイヤー${player}：キャラクターを選択`;
+  const grid = $("charGrid");
+  grid.innerHTML = "";
+  for (const id of CHAR_ORDER) {
+    const c = CHARACTERS[id];
+    const btn = document.createElement("button");
+    btn.className = "char-opt";
+    btn.dataset.id = id;
+    btn.innerHTML = `
+      <img src="${c.icon}" alt="${c.name}" decoding="async" />
+      <div class="cname">${c.name}</div>
+      <div class="cmove">必殺技／${c.special.name}</div>
+      <div class="ccost">消費エネルギー ${c.special.cost}</div>
+      <div class="cdesc">${c.special.desc}</div>`;
+    btn.addEventListener("click", () => selectChar(id));
+    grid.appendChild(btn);
+  }
+  $("charConfirmBtn").disabled = true;
+  showScreen("charScreen");
+}
+
+function selectChar(id) {
+  pendingChar = id;
+  document.querySelectorAll(".char-opt").forEach((el) =>
+    el.classList.toggle("selected", el.dataset.id === id));
+  $("charConfirmBtn").disabled = false;
+}
+
+function confirmChar() {
+  if (!pendingChar) return;
+  if (state.mode === "online") {
+    // Online: lock in our own character on the server and wait for both.
+    Online.selectCharacter(pendingChar);
+    $("charConfirmBtn").disabled = true;
+    $("charPrompt").textContent = "相手のキャラクター選択を待っています…";
+    return;
+  }
+  const player = state.currentPlayer;
+  state.char[player] = pendingChar;
+  if (player === 1) {
+    goToCharSelect(2);
+  } else {
+    // both chosen -> start the match
+    startTurn();
+  }
+}
+
+// ---- Flow ----
+function startTurn() {
+  state.choice = { 1: null, 2: null };
+  state.currentPlayer = 1;
+  renderEnergy();
+  renderHP();
+  $("turnBanner").textContent = `ターン ${state.turn}`;
+  goToPass(1);
+}
+
+function goToPass(player) {
+  state.currentPlayer = player;
+  setActiveCard(player);
+  $("passPrompt").textContent = `プレイヤー${player} の番です`;
+  $("passBtn").textContent = `プレイヤー${player}：アクションを選ぶ`;
+  showScreen("passScreen");
+}
+
+function goToSelect(player) {
+  setActiveCard(player);
+  pendingAction = null;
+  $("selectPrompt").textContent = `プレイヤー${player}：アクションを選択`;
+  $("actionDesc").textContent = "アクションを選んでください";
+  $("selectConfirmBtn").disabled = true;
+  const container = $("actionButtons");
+  container.innerHTML = "";
+  // Row 1: チャージ / ガード / ブラスト   Row 2: メガブラスト / 必殺技
+  // Row 3: 相手の必殺技 (info-only; shows the opponent's special description and
+  //        can NEVER be confirmed — it is not a real action).
+  // (a 3-column grid lays these out into rows of equal squares)
+  for (const key of ["charge", "guard", "blast", "megablast", "special", "oppSpecial"]) {
+    const a = actionMeta(player, key);
+    const btn = document.createElement("button");
+    btn.className = "action";
+    btn.dataset.key = key;
+    if (key === "oppSpecial") {
+      // Purely informational: never dimmed for energy, never affordable.
+      btn.classList.add("info-only");
+    } else {
+      // Unaffordable actions can still be selected (so their description shows),
+      // but they are visually dimmed and the 決定 button stays disabled.
+      const canAfford = state.energy[player] >= a.cost;
+      if (!canAfford) btn.classList.add("unaffordable");
+    }
+    btn.title = `${a.label}`;
+    btn.setAttribute("aria-label", a.label);
+    btn.innerHTML = `<img class="icon" src="${a.icon}" alt="" decoding="async" />`;
+    btn.addEventListener("click", () => pickAction(player, key));
+    container.appendChild(btn);
+  }
+  showScreen("selectScreen");
+}
+
+// Highlight the tentatively-chosen action and show its description. The choice
+// is only committed when the 決定 button is pressed; unaffordable actions show
+// their description but cannot be confirmed.
+function pickAction(player, key) {
+  const a = actionMeta(player, key);
+  document.querySelectorAll("#actionButtons .action").forEach((el) =>
+    el.classList.toggle("selected", el.dataset.key === key));
+  // "相手の必殺技" is info-only: show the opponent's special description and
+  // keep the 決定 button disabled — it can never be committed as an action.
+  if (a.info) {
+    $("actionDesc").textContent = `${a.label}／${a.desc}`;
+    pendingAction = null;
+    $("selectConfirmBtn").disabled = true;
+    return;
+  }
+  const canAfford = state.energy[player] >= a.cost;
+  // e.g. "VOID／エネルギー: -1／相手のエネルギーを1減らす"
+  $("actionDesc").textContent = `${a.label}／エネルギー: ${a.energy}／${a.desc}`;
+  if (canAfford) {
+    pendingAction = key;
+    $("selectConfirmBtn").disabled = false;
+  } else {
+    pendingAction = null;
+    $("selectConfirmBtn").disabled = true;
+  }
+}
+
+function confirmAction() {
+  if (!pendingAction) return;
+  if (state.mode === "online") {
+    // Online: submit our action to the server; it stays hidden from the
+    // opponent until both have chosen. Show a waiting overlay meanwhile.
+    Online.submitAction(pendingAction);
+    showWaitOverlay("対戦相手を待っています…", "相手がアクションを選ぶまでお待ちください");
+    return;
+  }
+  const player = state.currentPlayer;
+  state.choice[player] = pendingAction;
+  if (player === 1) {
+    goToPass(2);
+  } else {
+    setActiveCard(0);
+    goToReady();
+  }
+}
+
+// An execute/ready screen between P2's choice and the battle scene
+function goToReady() {
+  $("readyFig1").innerHTML = readySilhouette(1);
+  $("readyFig2").innerHTML = readySilhouette(2);
+  showScreen("readyScreen");
+}
+
+function readySilhouette(player) {
+  // Player 2 art is flipped here too, matching the battle scene.
+  const flip = player === 2 ? "transform:scaleX(-1);" : "";
+  return `<img src="${poseSrc(player, "stance")}" alt=""
+    style="width:100%;height:100%;object-fit:contain;object-position:bottom center;${flip}filter:brightness(0.15) drop-shadow(0 0 6px rgba(0,0,0,0.6));" />`;
+}
+
+// ---- Battle resolution -------------------------------------------------
+// Returns { events: [ {target, dmg} | {target, heal} | {target, drainEnergy} ],
+//           logs: [..], attackers: {1:bool,2:bool} } describing what happens
+// this turn. HP/energy are applied afterwards, then win is checked.
+function resolveTurn(a1, a2) {
+  const sp1 = charOf(1).special, sp2 = charOf(2).special;
+  const events = [];
+  const logs = [];
+
+  // Common-action damage (mirrors shared/gameEngine.js).
+  const BLAST_DMG = 1, MEGA_DMG = 1;
+  const LABELS = { charge: "チャージ", blast: "ブラスト", guard: "ガード", megablast: "メガブラスト" };
+  const actName = (p, a) => (a === "special" ? charOf(p).special.name : LABELS[a]);
+
+  // Attack class of a player's action: "blast" | "mega" | "giga" | "pierce" | null.
+  const classOf = (p, a) => {
+    if (a === "blast") return "blast";
+    if (a === "megablast") return "mega";
+    if (a === "special") {
+      const sp = charOf(p).special;
+      if (sp.kind === "attack") return sp.attackClass || (sp.guardable ? "mega" : "pierce");
+    }
+    return null;
+  };
+  const isBlastTypeClass = (cls) => cls === "blast" || cls === "mega" || cls === "giga";
+  const cls1 = classOf(1, a1), cls2 = classOf(2, a2);
+
+  // Determine per-player "attack intent" for VOID interaction.
+  const isAttack = (p, a) => a === "blast" || a === "megablast" ||
+    (a === "special" && charOf(p).special.kind === "attack");
+
+  // Blast-type projectiles (blast / mega / giga) mutually cancel. 波動拳
+  // (pierce) does NOT clash — it nullifies blast-types instead.
+  const clash = isBlastTypeClass(cls1) && isBlastTypeClass(cls2);
+  const p1Pierce = cls1 === "pierce", p2Pierce = cls2 === "pierce";
+
+  // Damage dealt by an attacking action against opponent's action.
+  function attackResult(attacker, cls, defAction) {
+    if (cls === "blast") {
+      // Plain blast is the only guard-blockable projectile.
+      if (defAction === "guard") return { dmg: 0, blocked: true };
+      return { dmg: BLAST_DMG, blocked: false };
+    }
+    if (cls === "mega") return { dmg: MEGA_DMG, blocked: false };      // unguardable
+    if (cls === "giga" || cls === "pierce") return { dmg: charOf(attacker).special.dmg, blocked: false };
+    return { dmg: 0, blocked: false, whiff: true };
+  }
+
+  // Heal (Angel)
+  for (const p of [1, 2]) {
+    const a = p === 1 ? a1 : a2;
+    if (a === "special" && charOf(p).special.kind === "heal") {
+      events.push({ type: "heal", target: p, amount: 1 });
+    }
+  }
+
+  // VOID drain: reduces opponent energy by 1.
+  for (const p of [1, 2]) {
+    const a = p === 1 ? a1 : a2;
+    if (a === "special" && charOf(p).special.kind === "drain") {
+      const opp = p === 1 ? 2 : 1;
+      events.push({ type: "drain", target: opp, amount: 1 });
+    }
+  }
+
+  // Blast-type vs blast-type: mutual cancel. No HP change, no knockback.
+  if (clash) {
+    logs.push("相殺！");
+    return { events, logs, clash: true, fails: { 1: false, 2: false },
+             isAttack: { 1: isAttack(1, a1), 2: isAttack(2, a2) } };
+  }
+
+  const res1 = attackResult(1, cls1, a2);
+  const res2 = attackResult(2, cls2, a1);
+
+  // A blast-type attack fails if the opponent used 波動拳 (pierce).
+  const p1Fails = isBlastTypeClass(cls1) && p2Pierce;
+  const p2Fails = isBlastTypeClass(cls2) && p1Pierce;
+
+  if (cls1) {
+    if (p1Fails) {
+      logs.push(`プレイヤー1の${actName(1, a1)}は無効化！`);
+    } else if (res1.blocked) {
+      logs.push(`プレイヤー2のガード成功！`);
+    } else if (res1.dmg > 0) {
+      events.push({ type: "dmg", target: 2, amount: res1.dmg, from: 1, action: a1 });
+    }
+  }
+  if (cls2) {
+    if (p2Fails) {
+      logs.push(`プレイヤー2の${actName(2, a2)}は無効化！`);
+    } else if (res2.blocked) {
+      logs.push(`プレイヤー1のガード成功！`);
+    } else if (res2.dmg > 0) {
+      events.push({ type: "dmg", target: 1, amount: res2.dmg, from: 2, action: a2 });
+    }
+  }
+
+  return { events, logs, fails: { 1: p1Fails, 2: p2Fails },
+           isAttack: { 1: isAttack(1, a1), 2: isAttack(2, a2) } };
+}
+
+function applyCosts() {
+  for (const p of [1, 2]) {
+    const key = state.choice[p];
+    if (key === "charge") state.energy[p] = Math.min(MAX_ENERGY, state.energy[p] + 1);
+    else state.energy[p] = Math.max(0, state.energy[p] - actionMeta(p, key).cost);
+  }
+}
+
+function applyEvents(events) {
+  for (const ev of events) {
+    if (ev.type === "dmg")   state.hp[ev.target] = Math.max(0, state.hp[ev.target] - ev.amount);
+    if (ev.type === "heal")  state.hp[ev.target] = Math.min(MAX_HP, state.hp[ev.target] + ev.amount);
+    if (ev.type === "drain") state.energy[ev.target] = Math.max(0, state.energy[ev.target] - ev.amount);
+  }
+}
+
+// ---- Battle scene (choreography) ---------------------------------------
+function delay(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+function ensureLoaded(src, timeoutMs = 2000) {
+  const im = IMG_CACHE[src] || (IMG_CACHE[src] = Object.assign(new Image(), { src }));
+  if (im.complete && im.naturalWidth > 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    im.addEventListener("load", finish, { once: true });
+    im.addEventListener("error", finish, { once: true });
+    setTimeout(finish, timeoutMs);
+  });
+}
+
+function preloadForBattle(a1, a2) {
+  const urls = new Set([poseSrc(1, a1), poseSrc(2, a2)]);
+  if (a1 === "blast") urls.add(blastFxSrc());
+  if (a2 === "blast") urls.add(blastFxSrc());
+  if (a1 === "megablast") urls.add(megaFxSrc());
+  if (a2 === "megablast") urls.add(megaFxSrc());
+  if (a1 === "special") urls.add(specialFxSrc(1));
+  if (a2 === "special") urls.add(specialFxSrc(2));
+  return Promise.all([...urls].map(ensureLoaded));
+}
+
+function shakeStage() {
+  const s = $("stage");
+  s.classList.remove("shake"); void s.offsetWidth; s.classList.add("shake");
+}
+function flashStage() {
+  const f = $("flash");
+  f.classList.remove("go"); void f.offsetWidth; f.classList.add("go");
+}
+
+// Fighters' hand height, measured from the stage bottom (their feet sit on the
+// ground at bottom:70px).
+const PROJECTILE_CENTER = 150;
+
+// kind: "blast" | "megablast" | "special"
+function spawnProjectile(fromPlayer, kind) {
+  const stage = $("stage");
+  const el = document.createElement("img");
+  const isSpecial = kind === "special";
+  const isMega = kind === "megablast";
+  el.className = "projectile " + (isSpecial ? "proj-special" : isMega ? "proj-mega" : "proj-blast");
+  if (fromPlayer === 2) el.classList.add("from-p2");
+  // Special uses the character FX; megablast uses its own FX; plain blast uses
+  // the shared blast FX.
+  el.src = isSpecial ? specialFxSrc(fromPlayer) : isMega ? megaFxSrc() : blastFxSrc();
+  const goRight = fromPlayer === 1;
+  const size = isSpecial ? 110 : isMega ? 92 : 48;
+  el.style.bottom = (PROJECTILE_CENTER - size / 2) + "px";
+  el.style.animation = `${goRight ? "travelR" : "travelL"} 0.6s linear forwards`;
+  stage.appendChild(el);
+  return el;
+}
+
+function impactAt(rightSide) {
+  const stage = $("stage");
+  const el = document.createElement("div");
+  el.className = "impact go";
+  el.style.bottom = (PROJECTILE_CENTER - 40) + "px";
+  if (rightSide) el.style.right = "70px"; else el.style.left = "70px";
+  stage.appendChild(el);
+  setTimeout(() => el.remove(), 600);
+}
+
+function healGlowAt(player) {
+  const stage = $("stage");
+  const el = document.createElement("div");
+  el.className = "heal-glow go";
+  el.style.bottom = (PROJECTILE_CENTER - 60) + "px";
+  if (player === 1) el.style.left = "20px"; else el.style.right = "20px";
+  stage.appendChild(el);
+  setTimeout(() => el.remove(), 950);
+}
+
+// Burst in the middle of the stage (used when two blast-type shots cancel).
+function impactMid() {
+  const stage = $("stage");
+  const el = document.createElement("div");
+  el.className = "impact go";
+  el.style.bottom = (PROJECTILE_CENTER - 60) + "px";
+  el.style.left = "50%"; el.style.transform = "translateX(-50%)";
+  el.style.width = "120px"; el.style.height = "120px";
+  stage.appendChild(el);
+  setTimeout(() => el.remove(), 600);
+}
+
+let halfInjected = false;
+function injectHalfKeyframes() {
+  if (halfInjected) return;
+  const s = document.createElement("style");
+  s.textContent = `
+    @keyframes travelRhalf { from{left:110px} to{left:calc(50% - 35px)} }
+    @keyframes travelLhalf { from{right:110px} to{right:calc(50% - 35px)} }`;
+  document.head.appendChild(s);
+  halfInjected = true;
+}
+
+function clashText(txt) {
+  const c = $("clash") || (() => {
+    const e = document.createElement("div"); e.id = "clash"; e.className = "clash"; $("stage").appendChild(e); return e;
+  })();
+  c.textContent = txt;
+  c.classList.remove("go"); void c.offsetWidth; c.classList.add("go");
+}
+
+function resetStage() {
+  const stage = $("stage");
+  stage.querySelectorAll(".projectile, .impact, .heal-glow").forEach((el) => el.remove());
+  const clash = $("clash");
+  if (clash) clash.remove();
+  stage.classList.remove("shake");
+  $("flash").classList.remove("go");
+  $("fw1").className = "fighter-wrap left p1c char-" + state.char[1];
+  $("fw2").className = "fighter-wrap right p2c char-" + state.char[2];
+  $("fig1").src = poseSrc(1, "stance");
+  $("fig2").src = poseSrc(2, "stance");
+  $("battleLog").textContent = "";
+  $("countdown").textContent = "";
+  $("battleNextWrap").classList.remove("show");
+  void stage.offsetWidth;
+}
+
+// runBattle plays the battle choreography for the current turn.
+// - Offline: it computes the outcome locally with resolveTurn().
+// - Online: `serverResult` (from the server's turnResult message) is passed in,
+//   and the AUTHORITATIVE outcome + resulting HP/energy from the server are used
+//   verbatim so both devices show an identical battle. No local recomputation.
+async function runBattle(serverResult) {
+  const myToken = battleToken;
+  const cancelled = () => myToken !== battleToken;
+
+  const online = state.mode === "online" && serverResult;
+  if (online) {
+    // Adopt the server's actions/characters so the shared choreography (which
+    // reads state.choice / state.char) renders exactly the resolved turn.
+    state.choice = { 1: serverResult.actions[1], 2: serverResult.actions[2] };
+    state.char = { 1: serverResult.chars[1], 2: serverResult.chars[2] };
+  }
+
+  const a1 = state.choice[1], a2 = state.choice[2];
+  showScreen("battle");
+  hideWaitOverlay();
+  setReadyBadge(1, false); setReadyBadge(2, false);
+  resetStage();
+
+  const fig1 = $("fig1"), fig2 = $("fig2");
+  const cd = $("countdown");
+
+  await preloadForBattle(a1, a2);
+  if (cancelled()) return;
+
+  for (const t of ["3", "2", "1", "FIGHT!"]) {
+    cd.textContent = t;
+    cd.classList.remove("pop"); void cd.offsetWidth; cd.classList.add("pop");
+    await delay(600);
+    if (cancelled()) return;
+  }
+  cd.textContent = "";
+
+  fig1.src = poseSrc(1, a1);
+  fig2.src = poseSrc(2, a2);
+  $("battleLog").textContent = `${actionMeta(1, a1).label}　VS　${actionMeta(2, a2).label}`;
+  await delay(700);
+  if (cancelled()) return;
+
+  // Outcome: server-authoritative when online, locally computed when offline.
+  // The two engines are the same rules, so the shape matches either way.
+  const outcome = online
+    ? {
+        events: serverResult.events,
+        logs: serverResult.logs,
+        clash: serverResult.clash,
+        fails: serverResult.fails,
+        isAttack: serverResult.isAttack,
+      }
+    : resolveTurn(a1, a2);
+
+  // Snapshot HP/EN so we can report the net change for each player afterward.
+  const before = {
+    hp: { 1: state.hp[1], 2: state.hp[2] },
+    en: { 1: state.energy[1], 2: state.energy[2] },
+  };
+
+  if (online) {
+    // Apply costs authoritatively from the server's "before" snapshot so the
+    // pre-event render matches the server exactly.
+    state.energy = { 1: serverResult.before.energy[1], 2: serverResult.before.energy[2] };
+  } else {
+    applyCosts();
+  }
+
+  await playChoreography(a1, a2, outcome);
+  if (cancelled()) return;
+
+  // Apply HP / energy changes now, then render. Online uses the server's
+  // authoritative post-turn state; offline computes it from events.
+  if (online) {
+    state.hp = { 1: serverResult.after.hp[1], 2: serverResult.after.hp[2] };
+    state.energy = { 1: serverResult.after.energy[1], 2: serverResult.after.energy[2] };
+  } else {
+    applyEvents(outcome.events);
+  }
+  renderEnergy();
+  renderHP();
+
+  // Build the change lines.
+  // - HP: always show the net change per player.
+  // - EN: do NOT show a player's own spending (blast/special cost). Only show
+  //   a charge gain (+1), and the EN a VOID drains from the opponent (-1).
+  const deltaLines = [];
+  for (const p of [1, 2]) {
+    const dHp = state.hp[p] - before.hp[p];
+    if (dHp !== 0) deltaLines.push(`プレイヤー${p}のHPが${dHp > 0 ? "+" : ""}${dHp}`);
+  }
+  for (const p of [1, 2]) {
+    const a = p === 1 ? a1 : a2;
+    // charge adds energy to oneself
+    if (a === "charge") deltaLines.push(`プレイヤー${p}のENが+1`);
+    // VOID drains the opponent's energy
+    if (a === "special" && charOf(p).special.kind === "drain") {
+      const opp = p === 1 ? 2 : 1;
+      deltaLines.push(`プレイヤー${opp}のENが-1`);
+    }
+  }
+
+  // Knockback + KO for damaged players.
+  const dmgTargets = outcome.events.filter((e) => e.type === "dmg").map((e) => e.target);
+  for (const t of [...new Set(dmgTargets)]) {
+    const wrap = t === 1 ? $("fw1") : $("fw2");
+    wrap.classList.add("knockback");
+    if (state.hp[t] <= 0) {
+      await delay(220);
+      wrap.classList.add("ko");
+    }
+  }
+  if (dmgTargets.length) await delay(500);
+  if (cancelled()) return;
+
+  // First line: the actions taken (e.g. "チャージ VS チャージ"), then any
+  // notices (ガード成功！ / 相殺！), then the HP/EN change lines. One per line.
+  const actionLine = `${actionMeta(1, a1).label}　VS　${actionMeta(2, a2).label}`;
+  const changes = [...outcome.logs, ...deltaLines];
+  const parts = [actionLine, ...(changes.length ? changes : ["変化なし"])];
+  $("battleLog").textContent = parts.join("\n");
+  await delay(1400);
+  if (cancelled()) return;
+  finishBattle();
+}
+
+// Advance to the next turn (called by the "次のターンへ" button).
+function goNextTurn() {
+  $("battleNextWrap").classList.remove("show");
+  if (state.mode === "online") {
+    // The server already advanced the turn number; just open our action select.
+    startTurnOnline();
+    return;
+  }
+  state.turn++;
+  startTurn();
+}
+
+async function playChoreography(a1, a2, outcome) {
+  const sp1 = charOf(1).special, sp2 = charOf(2).special;
+  const isAttackAction = (p, a) => a === "blast" || a === "megablast" ||
+    (a === "special" && charOf(p).special.kind === "attack");
+  // Which projectile sprite to fire for an attacking action.
+  const projKind = (a) => (a === "special" ? "special" : a === "megablast" ? "megablast" : "blast");
+
+  const p1Attacks = isAttackAction(1, a1);
+  const p2Attacks = isAttackAction(2, a2);
+
+  // Blast-type clash: both projectiles fly, meet mid-stage and cancel. No hit,
+  // no knockback (there are no damage events for a clash).
+  if (outcome.clash) {
+    injectHalfKeyframes();
+    const p1 = spawnProjectile(1, projKind(a1));
+    const p2 = spawnProjectile(2, projKind(a2));
+    p1.style.animation = "travelRhalf 0.4s linear forwards";
+    p2.style.animation = "travelLhalf 0.4s linear forwards";
+    await delay(400);
+    p1.remove(); p2.remove();
+    impactMid(); clashText("相殺！"); flashStage(); shakeStage();
+    await delay(500);
+    return;
+  }
+
+  // Heal choreography (Angel)
+  for (const p of [1, 2]) {
+    const a = p === 1 ? a1 : a2;
+    if (a === "special" && charOf(p).special.kind === "heal") {
+      healGlowAt(p);
+      clashText("HEAL!");
+    }
+  }
+
+  // Fire projectiles for any attacking action. A failing blast-type shot
+  // (overpowered by the opponent's 波動拳) only travels part-way then fizzles.
+  const fails = outcome.fails || { 1: false, 2: false };
+  const projectiles = [];
+  if (p1Attacks) {
+    const el = spawnProjectile(1, projKind(a1));
+    if (fails[1]) el.style.animationDuration = "0.28s";
+    projectiles.push(el);
+  }
+  if (p2Attacks) {
+    const el = spawnProjectile(2, projKind(a2));
+    if (fails[2]) el.style.animationDuration = "0.28s";
+    projectiles.push(el);
+  }
+
+  // VOID drain shimmer (Phantom) — small pulse toward opponent.
+  for (const p of [1, 2]) {
+    const a = p === 1 ? a1 : a2;
+    if (a === "special" && charOf(p).special.kind === "drain") {
+      const el = spawnProjectile(p, "special");
+      el.style.animationDuration = "0.5s";
+      projectiles.push(el);
+    }
+  }
+
+  if (projectiles.length || p1Attacks || p2Attacks) {
+    await delay(600);
+  } else {
+    // pure charge/guard/heal turn
+    if (!outcome.events.some((e) => e.type === "heal")) clashText("…");
+    await delay(500);
+  }
+  projectiles.forEach((el) => el.remove());
+
+  // Impacts for damage events.
+  const dmg = outcome.events.filter((e) => e.type === "dmg");
+  const blocked = outcome.logs.some((l) => l.includes("ガード成功"));
+  for (const ev of dmg) {
+    impactAt(ev.target === 2);
+  }
+  if (dmg.length) { flashStage(); shakeStage(); }
+  else if (blocked) { clashText("GUARD!"); flashStage(); shakeStage(); }
+
+  await delay(300);
+}
+
+function finishBattle() {
+  const dead1 = state.hp[1] <= 0, dead2 = state.hp[2] <= 0;
+  // No KO: wait for the player to press "次のターンへ" instead of auto-advancing.
+  if (!dead1 && !dead2) { $("battleNextWrap").classList.add("show"); return; }
+
+  let winner;
+  if (dead1 && dead2) winner = 0;         // double KO -> draw
+  else winner = dead2 ? 1 : 2;
+
+  showScreen("result");
+  setActiveCard(0);
+  $("turnBanner").textContent = "";
+  if (winner === 0) {
+    $("winnerText").textContent = "引き分け！";
+    $("winnerText").style.color = "var(--text)";
+    $("winnerSub").textContent = "両者ダウン！";
+  } else {
+    $("winnerText").textContent = `🏆 プレイヤー${winner} の勝ち！`;
+    $("winnerText").style.color = winner === 1 ? "var(--p1)" : "var(--p2)";
+    $("winnerSub").textContent = "相手のHPを0にした！";
+  }
+}
+
+// =======================================================================
+// ONLINE MODE
+// =======================================================================
+// UI helpers -------------------------------------------------------------
+let toastTimer = null;
+function toast(message, kind) {
+  const el = $("toast");
+  el.textContent = message;
+  el.className = "toast show" + (kind === "info" ? " info" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.classList.remove("show"); }, 3800);
+}
+function showWaitOverlay(text, sub) {
+  $("waitText").textContent = text || "対戦相手を待っています…";
+  $("waitSub").textContent = sub || "";
+  $("waitOverlay").classList.add("show");
+}
+function hideWaitOverlay() { $("waitOverlay").classList.remove("show"); }
+function setReadyBadge(slot, on) { $("ready" + slot).classList.toggle("show", !!on); }
+function setConnPill(cls, text) {
+  const pill = $("connPill");
+  pill.className = "conn-pill " + cls;
+  $("connText").textContent = text;
+}
+// Label the two player cards for online play: "Player1" / "Player2". The
+// player's own card gets a "self" class so it is highlighted more strongly.
+function labelPlayersForOnline() {
+  const me = Online.slot;
+  $("name1").textContent = "Player1";
+  $("name2").textContent = "Player2";
+  $("card1").classList.toggle("self", me === 1);
+  $("card2").classList.toggle("self", me === 2);
+}
+
+// The Online controller: owns the WebSocket, the room/slot, and translates
+// server messages into UI state transitions. The SERVER is authoritative; this
+// client never computes HP/energy itself in online mode.
+const Online = (function () {
+  let ws = null;
+  let slot = null;         // 1 or 2 (which player we are)
+  let roomId = null;
+  let intentionalClose = false;
+  let reconnectTimer = null;
+  let pendingSend = [];     // messages queued while socket is connecting
+
+  function url() {
+    const cfg = window.HADOUKEN_ONLINE_CONFIG || {};
+    return (cfg.WEBSOCKET_URL || "").trim();
+  }
+  function isConfigured() { return !!url(); }
+
+  function connect(onOpen) {
+    if (!isConfigured()) {
+      toast("オンライン対戦は未設定です（online-config.js に WebSocket URL を設定してください）");
+      return false;
+    }
+    intentionalClose = false;
+    setConnPill("connecting", "接続中…");
+    try {
+      ws = new WebSocket(url());
+    } catch (e) {
+      setConnPill("disconnected", "接続失敗");
+      toast("サーバーに接続できませんでした");
+      return false;
+    }
+    ws.addEventListener("open", () => {
+      setConnPill("connected", "接続済み");
+      // flush any queued messages
+      const q = pendingSend; pendingSend = [];
+      q.forEach((m) => rawSend(m));
+      if (onOpen) onOpen();
+    });
+    ws.addEventListener("message", (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      handleMessage(msg);
+    });
+    ws.addEventListener("close", () => {
+      if (intentionalClose) { setConnPill("disconnected", "切断"); return; }
+      // A comms-error disconnect frees the room server-side (its code becomes
+      // reusable). We therefore do NOT silently reconnect into a dead room;
+      // instead we tear down the local session and return the player home.
+      setConnPill("disconnected", "切断");
+      clearTimeout(reconnectTimer);
+      const hadRoom = !!roomId;
+      roomId = null;
+      slot = null;
+      if (hadRoom && typeof toast === "function") {
+        toast("接続が切れました。ルームを終了します。");
+      }
+      if (hadRoom && typeof goHome === "function") {
+        setTimeout(() => goHome(), 1200);
+      }
+    });
+    ws.addEventListener("error", () => { /* close handler manages UI */ });
+    return true;
+  }
+
+  function rawSend(obj) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(obj));
+    } else {
+      pendingSend.push(obj);
+    }
+  }
+
+  function send(action, extra) {
+    rawSend(Object.assign({ action }, extra || {}));
+  }
+
+  // ---- Outbound actions ----
+  function createRoom(code) {
+    roomId = code;
+    const go = () => send("createRoom", { roomId: code });
+    if (ws && ws.readyState === WebSocket.OPEN) go(); else connect(go);
+  }
+  function joinRoom(code) {
+    roomId = code;
+    const go = () => send("joinRoom", { roomId: code });
+    if (ws && ws.readyState === WebSocket.OPEN) go(); else connect(go);
+  }
+  function selectCharacter(charId) { send("selectCharacter", { charId }); }
+  // The move is sent under "move" (NOT "action") so it never collides with the
+  // "action" route-selection field used by API Gateway.
+  function submitAction(move) { send("submitAction", { move, turn: state.turn }); }
+  function rematch() { send("rematch"); }
+  function changeCharacters() { send("changeCharacters"); }
+  function leaveAndClose() {
+    if (ws && ws.readyState === WebSocket.OPEN && roomId) {
+      intentionalClose = true;
+      try { send("leave"); } catch (e) {}
+    }
+    intentionalClose = true;
+    clearTimeout(reconnectTimer);
+    if (ws) { try { ws.close(); } catch (e) {} }
+    ws = null; slot = null; roomId = null; pendingSend = [];
+  }
+
+  // ---- Inbound message handling ----
+  function applyRoomState(room) {
+    if (!room) return;
+    slot = room.slot;
+    Online.slot = slot;
+    roomId = room.roomId;
+    state.turn = room.turn;
+    state.hp = { 1: room.hp["1"], 2: room.hp["2"] };
+    state.energy = { 1: room.energy["1"], 2: room.energy["2"] };
+    state.char = { 1: room.chars["1"], 2: room.chars["2"] };
+  }
+
+  function handleMessage(msg) {
+    switch (msg.type) {
+      case "roomCreated": {
+        applyRoomState(msg.room);
+        $("roomCodeDisplay").textContent = roomId;
+        showLobbyStep("lobbyWaiting");
+        showScreen("lobby");
+        break;
+      }
+      case "roomJoined": {
+        applyRoomState(msg.room);
+        labelPlayersForOnline();
+        toast("対戦相手が揃いました！", "info");
+        enterOnlineCharSelect();
+        break;
+      }
+      case "charUpdate": {
+        applyRoomState(msg.room);
+        // If we've locked ours but opponent hasn't, keep the waiting message.
+        const mine = state.char[slot];
+        if (mine) $("charPrompt").textContent = "相手のキャラクター選択を待っています…";
+        break;
+      }
+      case "battleStart": {
+        applyRoomState(msg.room);
+        labelPlayersForOnline();
+        startTurnOnline();
+        break;
+      }
+      case "waitingForOpponent": {
+        applyRoomState(msg.room);
+        showWaitOverlay("対戦相手を待っています…", "相手がアクションを選ぶまでお待ちください");
+        break;
+      }
+      case "opponentReady": {
+        applyRoomState(msg.room);
+        // The opponent has chosen, but we intentionally do NOT surface any
+        // "opponent selected" indicator on our side (no textual notice and no
+        // ready badge) so the choice stays hidden until both are in.
+        break;
+      }
+      case "turnResult": {
+        applyRoomState(msg.room);
+        battleToken++;
+        const myToken = battleToken;
+        // Play the shared battle choreography from the server's result.
+        runBattle(msg.result);
+        break;
+      }
+      case "rematchStart": {
+        applyRoomState(msg.room);
+        $("restartBtn").disabled = false;
+        toast("再戦スタート！", "info");
+        startTurnOnline();
+        break;
+      }
+      case "charSelectReset": {
+        applyRoomState(msg.room);
+        $("restartBtn").disabled = false;
+        $("reselectBtn").disabled = false;
+        enterOnlineCharSelect();
+        break;
+      }
+      case "opponentDisconnected": {
+        toast("相手の接続が切れました。再接続を待っています…");
+        $("onlineStatus").textContent = "相手が切断しました";
+        break;
+      }
+      case "opponentLeft": {
+        toast("相手が退出しました");
+        hideWaitOverlay();
+        // Return to home; the room is closed server-side.
+        setTimeout(() => goHome(), 1400);
+        break;
+      }
+      case "error": {
+        handleServerError(msg);
+        break;
+      }
+      case "state": {
+        applyRoomState(msg.room);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  function handleServerError(msg) {
+    const map = {
+      room_exists: "そのルームコードは使用中です。別のコードを試してください。",
+      room_not_found: "ルームが見つかりません。コードを確認してください。",
+      room_full: "このルームは満員です。",
+      bad_room_code: "ルームコードは4桁の数字で入力してください。",
+      bad_character: "不正なキャラクターです。",
+      not_playing: "対戦中ではありません。",
+      not_enough_energy: "エネルギーが足りません。",
+      no_room: "ルームに参加していません。",
+    };
+    toast(map[msg.code] || msg.message || "エラーが発生しました");
+    // Re-enable inputs that may have been disabled while waiting.
+    $("createConfirmBtn").disabled = false;
+    $("joinConfirmBtn").disabled = false;
+    $("charConfirmBtn").disabled = false;
+    hideWaitOverlay();
+  }
+
+  return {
+    slot: null,
+    isConfigured,
+    createRoom, joinRoom, selectCharacter, submitAction, rematch, changeCharacters, leaveAndClose,
+    get roomId() { return roomId; },
+  };
+})();
+
+// ---- Online flow entry points -----------------------------------------
+function openOnlineLobby() {
+  battleToken++;
+  initState();
+  state.mode = "online";
+  $("app").classList.add("online");
+  if (!Online.isConfigured()) {
+    setConnPill("disconnected", "未設定");
+  } else {
+    setConnPill("connecting", "接続待ち");
+  }
+  showLobbyStep("lobbyChoose");
+  showScreen("lobby");
+}
+
+function showLobbyStep(stepId) {
+  ["lobbyChoose", "lobbyCreate", "lobbyJoin", "lobbyWaiting"].forEach((id) => {
+    $(id).style.display = id === stepId ? "block" : "none";
+  });
+  // Re-enable the confirm buttons whenever we (re)enter their step.
+  $("createConfirmBtn").disabled = false;
+  $("joinConfirmBtn").disabled = false;
+}
+
+// Enter character selection in online mode (both players choose independently).
+function enterOnlineCharSelect() {
+  state.mode = "online";
+  $("app").classList.add("online");
+  // Render the character grid; selection targets OUR slot on the server.
+  state.currentPlayer = Online.slot;
+  goToCharSelect(Online.slot);
+  $("charPrompt").textContent = "キャラクターを選択";
+}
+
+// Begin a turn in online mode: open OUR action-select screen only.
+function startTurnOnline() {
+  battleToken++;
+  state.choice = { 1: null, 2: null };
+  hideWaitOverlay();
+  setReadyBadge(1, false); setReadyBadge(2, false);
+  $("onlineStatus").textContent = "";
+  renderEnergy();
+  renderHP();
+  $("turnBanner").textContent = `ターン ${state.turn}`;
+  state.currentPlayer = Online.slot;
+  setActiveCard(Online.slot);
+  goToSelect(Online.slot);
+}
+
+// ---- Events ----
+$("charConfirmBtn").addEventListener("click", () => confirmChar());
+$("selectConfirmBtn").addEventListener("click", () => confirmAction());
+$("passBtn").addEventListener("click", () => goToSelect(state.currentPlayer));
+$("fightBtn").addEventListener("click", () => runBattle());
+$("nextTurnBtn").addEventListener("click", () => goNextTurn());
+$("startBtn").addEventListener("click", () => startGame());
+$("restartBtn").addEventListener("click", () => playAgain());
+$("reselectBtn").addEventListener("click", () => reselectChars());
+$("resultHomeBtn").addEventListener("click", () => goHome());
+$("homeBtn").addEventListener("click", () => goHome());
+
+// ---- Online events ----
+$("onlineBtn").addEventListener("click", () => openOnlineLobby());
+$("createRoomBtn").addEventListener("click", () => showLobbyStep("lobbyCreate"));
+$("joinRoomBtn").addEventListener("click", () => showLobbyStep("lobbyJoin"));
+$("createBackBtn").addEventListener("click", () => showLobbyStep("lobbyChoose"));
+$("joinBackBtn").addEventListener("click", () => showLobbyStep("lobbyChoose"));
+$("lobbyCancelBtn").addEventListener("click", () => goHome());
+
+// Restrict the code inputs to 4 digits.
+["createCodeInput", "joinCodeInput"].forEach((id) => {
+  $(id).addEventListener("input", (e) => {
+    e.target.value = e.target.value.replace(/[^0-9]/g, "").slice(0, 4);
+  });
+});
+
+$("createConfirmBtn").addEventListener("click", () => {
+  const code = $("createCodeInput").value;
+  if (!/^[0-9]{4}$/.test(code)) { toast("4桁の数字を入力してください"); return; }
+  $("createConfirmBtn").disabled = true;
+  Online.createRoom(code);
+});
+$("joinConfirmBtn").addEventListener("click", () => {
+  const code = $("joinCodeInput").value;
+  if (!/^[0-9]{4}$/.test(code)) { toast("4桁の数字を入力してください"); return; }
+  $("joinConfirmBtn").disabled = true;
+  Online.joinRoom(code);
+});
+
+// ---- Start ----
+initState();
+goHome();
+</script>
+</body>
+</html>

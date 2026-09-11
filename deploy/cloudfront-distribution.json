@@ -1,0 +1,41 @@
+{
+  "_comment": "One-time CloudFront distribution config. Replace <BUCKET_REGIONAL_DOMAIN> (e.g. hadouken3-<ACCOUNT_ID>-us-east-1.s3.us-east-1.amazonaws.com) and <OAC_ID> before use. CachePolicyId is the AWS managed 'CachingOptimized' policy.",
+  "CallerReference": "hadouken3-static-site",
+  "Comment": "Hadouken3 static site",
+  "Enabled": true,
+  "DefaultRootObject": "index.html",
+  "Origins": {
+    "Quantity": 1,
+    "Items": [
+      {
+        "Id": "s3-hadouken3",
+        "DomainName": "<BUCKET_REGIONAL_DOMAIN>",
+        "OriginAccessControlId": "<OAC_ID>",
+        "S3OriginConfig": { "OriginAccessIdentity": "" }
+      }
+    ]
+  },
+  "DefaultCacheBehavior": {
+    "TargetOriginId": "s3-hadouken3",
+    "ViewerProtocolPolicy": "redirect-to-https",
+    "Compress": true,
+    "AllowedMethods": {
+      "Quantity": 2,
+      "Items": ["GET", "HEAD"],
+      "CachedMethods": { "Quantity": 2, "Items": ["GET", "HEAD"] }
+    },
+    "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  },
+  "CustomErrorResponses": {
+    "Quantity": 1,
+    "Items": [
+      {
+        "ErrorCode": 403,
+        "ResponsePagePath": "/index.html",
+        "ResponseCode": "200",
+        "ErrorCachingMinTTL": 10
+      }
+    ]
+  },
+  "PriceClass": "PriceClass_100"
+}

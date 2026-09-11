@@ -1,0 +1,10 @@
+{
+  "name": "hadouken-online",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hadouken Battle online backend (AWS SAM). Rule engine + WebSocket Lambda.",
+  "scripts": {
+    "test": "node --test test/gameEngine.test.js test/rooms.test.js",
+    "test:watch": "node --test --watch test/gameEngine.test.js test/rooms.test.js"
+  }
+}

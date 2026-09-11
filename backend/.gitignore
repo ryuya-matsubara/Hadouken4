@@ -1,0 +1,13 @@
+# SAM / build artifacts
+.aws-sam/
+samconfig.local.toml
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Never commit AWS credentials or environment secrets
+.env
+.env.*
+*.pem
+aws-credentials*

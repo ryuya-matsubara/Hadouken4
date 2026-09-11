@@ -1,0 +1,300 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Hadouken Battle - Online multiplayer backend.
+  Fully serverless: API Gateway WebSocket API + a single Lambda dispatcher +
+  DynamoDB (on-demand, TTL) + CloudWatch Logs. No always-on compute, so the
+  idle cost is effectively zero. Region: ap-northeast-1.
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+  StageName:
+    Type: String
+    Default: prod
+    Description: WebSocket API stage name.
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+    Description: CloudWatch Logs retention (days). Keeps log storage cost low.
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90]
+
+# ---------------------------------------------------------------------------
+# Globals (SAM) - applied to all AWS::Serverless::Function resources
+# ---------------------------------------------------------------------------
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    MemorySize: 256
+    Timeout: 15
+    Architectures:
+      - arm64
+    Tracing: Active
+
+Resources:
+  # =========================================================================
+  # DynamoDB - two on-demand tables with TTL for auto-cleanup
+  # =========================================================================
+  RoomsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-Rooms"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: roomId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: roomId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  ConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-Connections"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: connectionId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connectionId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  # =========================================================================
+  # WebSocket API (raw CloudFormation - SAM has no first-class WebSocket type)
+  # =========================================================================
+  WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "${AWS::StackName}-ws"
+      ProtocolType: WEBSOCKET
+      # Dispatch on the "action" field of the JSON message body.
+      RouteSelectionExpression: "$request.body.action"
+
+  # ---- Single Lambda that handles every route ----------------------------
+  GameFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-game"
+      CodeUri: src/
+      Handler: handlers/index.handler
+      Role: !GetAtt GameFunctionRole.Arn
+      Environment:
+        Variables:
+          ROOMS_TABLE: !Ref RoomsTable
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+          NODE_OPTIONS: "--enable-source-maps"
+
+  # ---- IAM role for the Lambda (least privilege) -------------------------
+  GameFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LogsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Scope logging to this function's own log group only.
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt GameFunctionLogGroup.Arn
+        - PolicyName: DynamoAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource:
+                  - !GetAtt RoomsTable.Arn
+                  - !GetAtt ConnectionsTable.Arn
+        - PolicyName: WebSocketManage
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Allow posting messages back to connected clients on this API.
+              - Effect: Allow
+                Action:
+                  - execute-api:ManageConnections
+                Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*"
+        - PolicyName: XRay
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: "*"
+
+  # ---- Explicit log group so retention/cost is controlled ----------------
+  GameFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-game"
+      RetentionInDays: !Ref LogRetentionDays
+
+  # ---- Lambda integration -------------------------------------------------
+  GameIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GameFunction.Arn}/invocations"
+
+  # ---- Routes -------------------------------------------------------------
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: "$connect"
+      AuthorizationType: NONE
+      Target: !Sub "integrations/${GameIntegration}"
+
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: "$disconnect"
+      Target: !Sub "integrations/${GameIntegration}"
+
+  DefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: "$default"
+      Target: !Sub "integrations/${GameIntegration}"
+
+  CreateRoomRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: createRoom
+      Target: !Sub "integrations/${GameIntegration}"
+
+  JoinRoomRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: joinRoom
+      Target: !Sub "integrations/${GameIntegration}"
+
+  SelectCharacterRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: selectCharacter
+      Target: !Sub "integrations/${GameIntegration}"
+
+  SubmitActionRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: submitAction
+      Target: !Sub "integrations/${GameIntegration}"
+
+  RematchRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: rematch
+      Target: !Sub "integrations/${GameIntegration}"
+
+  ChangeCharactersRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: changeCharacters
+      Target: !Sub "integrations/${GameIntegration}"
+
+  LeaveRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: leave
+      Target: !Sub "integrations/${GameIntegration}"
+
+  # ---- Deployment + Stage -------------------------------------------------
+  # The deployment must depend on all routes so it captures the full config.
+  Deployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      - ConnectRoute
+      - DisconnectRoute
+      - DefaultRoute
+      - CreateRoomRoute
+      - JoinRoomRoute
+      - SelectCharacterRoute
+      - SubmitActionRoute
+      - RematchRoute
+      - ChangeCharactersRoute
+      - LeaveRoute
+    Properties:
+      ApiId: !Ref WebSocketApi
+
+  Stage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref WebSocketApi
+      StageName: !Ref StageName
+      DeploymentId: !Ref Deployment
+      DefaultRouteSettings:
+        # Keep access logging light; throttle to protect against abuse.
+        DataTraceEnabled: false
+        DetailedMetricsEnabled: false
+        ThrottlingBurstLimit: 50
+        ThrottlingRateLimit: 20
+
+  # ---- Permission for API Gateway to invoke the Lambda -------------------
+  GameFunctionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GameFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*"
+
+# ---------------------------------------------------------------------------
+# Outputs - values the frontend / operator needs
+# ---------------------------------------------------------------------------
+Outputs:
+  WebSocketURL:
+    Description: "wss:// URL to configure in the frontend (ONLINE mode)."
+    Value: !Sub "wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+  WebSocketApiId:
+    Description: WebSocket API ID.
+    Value: !Ref WebSocketApi
+  RoomsTableName:
+    Description: DynamoDB rooms table name.
+    Value: !Ref RoomsTable
+  ConnectionsTableName:
+    Description: DynamoDB connections table name.
+    Value: !Ref ConnectionsTable
+  GameFunctionName:
+    Description: Lambda function name.
+    Value: !Ref GameFunction
+  Region:
+    Description: Deployment region.
+    Value: !Ref AWS::Region
