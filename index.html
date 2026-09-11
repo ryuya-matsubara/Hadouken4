@@ -19,6 +19,13 @@
 <!-- Online mode configuration (WebSocket URL). Safe to commit: contains no secrets. -->
 <script src="online-config.js"></script>
 
+<!-- Shared rule engine (single source of truth) + CPU AI. Loaded for CPU mode:
+     the CPU's decisions are computed by simulating turns with the SAME engine
+     the game uses, so no rules are duplicated for the AI. These do not affect
+     the local/online flows (which keep their own inline resolver). -->
+<script src="shared/gameEngine.js"></script>
+<script src="shared/cpuAI.js"></script>
+
 <!-- Start image downloads as early as possible for near-instant display -->
 <link rel="preconnect" href="https://github.com" crossorigin />
 <link rel="preconnect" href="https://objects.githubusercontent.com" crossorigin />
@@ -501,7 +508,8 @@
     <div class="card home-card">
       <p class="home-lead">プレイヤー同士の読み合い対戦<br>相手のHPを0にした方が勝ち！</p>
       <div class="mode-btns">
-        <button class="big-btn" id="startBtn">🎮 ローカル対戦</button>
+        <button class="big-btn" id="cpuBtn">🤖 CPU対戦</button>
+        <button class="big-btn secondary" id="startBtn">🎮 ローカル対戦</button>
         <button class="big-btn secondary" id="onlineBtn">🌐 オンライン対戦</button>
       </div>
 
@@ -822,7 +830,9 @@ function initState() {
     currentPlayer: 1,
     choice: { 1: null, 2: null },
     // "offline" = original hot-seat game; "online" = WebSocket match.
+    // CPU mode reuses the offline flow with `cpu: true` (Player 2 = computer).
     mode: "offline",
+    cpu: false,
   };
 }
 
@@ -853,6 +863,88 @@ function startGame() {
   goToCharSelect(1);
 }
 
+// =======================================================================
+// CPU MODE
+// =======================================================================
+// CPU mode reuses the entire offline hot-seat flow: the human is Player 1 and
+// the computer is Player 2. The ONLY differences are (a) Player 2's character
+// is auto-picked, and (b) after the human confirms their action, the CPU's
+// action is chosen automatically by the AI instead of via the pass/select
+// screens. All rule resolution, animation and win handling are unchanged.
+//
+// The CPU's decisions come from shared/cpuAI.js, which is fed the SAME shared
+// rule engine (HadoukenEngine) the game uses — no rules are re-implemented for
+// the AI. If those scripts failed to load we simply hide the CPU button.
+const Cpu = (function () {
+  var ai = null;              // current cpuAI instance (Player 2)
+  var CPU_SLOT = 2;
+
+  function available() {
+    return typeof HadoukenEngine !== "undefined" &&
+           typeof HadoukenCpuAI !== "undefined";
+  }
+
+  // (Re)create the AI for a fresh match. Clears the learned player history.
+  function reset() {
+    if (!available()) { ai = null; return; }
+    ai = HadoukenCpuAI.createCpuAI(HadoukenEngine, { cpuSlot: CPU_SLOT });
+  }
+
+  // A plain view of the current game state for the AI (char/hp/energy only).
+  function snapshot() {
+    return {
+      char: { 1: state.char[1], 2: state.char[2] },
+      hp: { 1: state.hp[1], 2: state.hp[2] },
+      energy: { 1: state.energy[1], 2: state.energy[2] },
+    };
+  }
+
+  // Pick a character for the CPU. Random among the roster (rules-only pick;
+  // there is no per-character AI personality).
+  function pickCharacter() {
+    var order = HadoukenEngine.CHAR_ORDER;
+    return order[Math.floor(Math.random() * order.length)];
+  }
+
+  // Choose the CPU's action for this turn (Player 2). Uses live Math.random for
+  // the softmax so play varies; the underlying AI is deterministic when a fixed
+  // rng is injected (see the unit tests).
+  function chooseAction() {
+    if (!ai) reset();
+    return ai.chooseAction(snapshot(), Math.random);
+  }
+
+  // Record the human's action so the AI can model their tendencies (spec #4).
+  function recordPlayerAction(action) {
+    if (ai) ai.recordPlayerAction(action);
+  }
+
+  return {
+    available: available,
+    reset: reset,
+    pickCharacter: pickCharacter,
+    chooseAction: chooseAction,
+    recordPlayerAction: recordPlayerAction,
+  };
+})();
+
+// Start a CPU match from the home screen. Human picks a character; the CPU's
+// character is auto-assigned right after.
+function startCpuGame() {
+  if (!Cpu.available()) {
+    toast("CPU対戦を初期化できませんでした");
+    return;
+  }
+  battleToken++;
+  initState();
+  state.cpu = true;
+  Cpu.reset();
+  // Label Player 2's card as the CPU (goHome() resets these back to defaults).
+  $("name1").textContent = "あなた";
+  $("name2").textContent = "CPU";
+  goToCharSelect(1);
+}
+
 // Play again after a result, keeping the chosen characters.
 function playAgain() {
   if (state.mode === "online") {
@@ -864,8 +956,12 @@ function playAgain() {
   }
   battleToken++;
   const keepChar = { 1: state.char[1], 2: state.char[2] };
+  const wasCpu = state.cpu;
   initState();
   state.char = keepChar;
+  state.cpu = wasCpu;
+  // Rematch keeps the same opponent: the CPU retains what it learned about the
+  // player's tendencies across the previous game.
   startTurn();
 }
 
@@ -881,7 +977,14 @@ function reselectChars() {
     return;
   }
   battleToken++;
+  const wasCpu = state.cpu;
   initState();
+  state.cpu = wasCpu;
+  if (state.cpu) {
+    // Re-selecting characters starts a fresh CPU match: reset the AI so it
+    // re-learns the player's tendencies against the new characters.
+    Cpu.reset();
+  }
   goToCharSelect(1);
 }
 
@@ -968,6 +1071,13 @@ function confirmChar() {
   }
   const player = state.currentPlayer;
   state.char[player] = pendingChar;
+  if (state.cpu) {
+    // CPU mode: the human is always Player 1. Auto-pick the CPU's character
+    // (Player 2) and jump straight into the match — no P2 selection screen.
+    state.char[2] = Cpu.pickCharacter();
+    startTurn();
+    return;
+  }
   if (player === 1) {
     goToCharSelect(2);
   } else {
@@ -1067,6 +1177,16 @@ function confirmAction() {
   }
   const player = state.currentPlayer;
   state.choice[player] = pendingAction;
+  if (state.cpu) {
+    // CPU mode: the human just locked in Player 1's action. Feed it to the AI
+    // (for player-tendency modelling), then let the CPU decide Player 2's
+    // action from the current state, and proceed straight to the battle.
+    Cpu.recordPlayerAction(pendingAction);
+    state.choice[2] = Cpu.chooseAction();
+    setActiveCard(0);
+    goToReady();
+    return;
+  }
   if (player === 1) {
     goToPass(2);
   } else {
@@ -1895,6 +2015,7 @@ $("selectConfirmBtn").addEventListener("click", () => confirmAction());
 $("passBtn").addEventListener("click", () => goToSelect(state.currentPlayer));
 $("fightBtn").addEventListener("click", () => runBattle());
 $("nextTurnBtn").addEventListener("click", () => goNextTurn());
+$("cpuBtn").addEventListener("click", () => startCpuGame());
 $("startBtn").addEventListener("click", () => startGame());
 $("restartBtn").addEventListener("click", () => playAgain());
 $("reselectBtn").addEventListener("click", () => reselectChars());
@@ -1928,6 +2049,13 @@ $("joinConfirmBtn").addEventListener("click", () => {
   $("joinConfirmBtn").disabled = true;
   Online.joinRoom(code);
 });
+
+// If the CPU AI / shared engine failed to load, hide the CPU button so the
+// rest of the game (local / online) keeps working normally.
+if (!Cpu.available()) {
+  const cpuBtn = $("cpuBtn");
+  if (cpuBtn) cpuBtn.style.display = "none";
+}
 
 // ---- Start ----
 initState();
