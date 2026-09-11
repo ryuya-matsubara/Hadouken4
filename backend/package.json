@@ -4,7 +4,7 @@
   "private": true,
   "description": "Hadouken Battle online backend (AWS SAM). Rule engine + WebSocket Lambda.",
   "scripts": {
-    "test": "node --test test/gameEngine.test.js test/rooms.test.js",
-    "test:watch": "node --test --watch test/gameEngine.test.js test/rooms.test.js"
+    "test": "node --test test/gameEngine.test.js test/rooms.test.js test/cpuAI.test.js",
+    "test:watch": "node --test --watch test/gameEngine.test.js test/rooms.test.js test/cpuAI.test.js"
   }
 }
